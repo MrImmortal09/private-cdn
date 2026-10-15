@@ -209,8 +209,10 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-// clientIP prefers Cloudflare's header, then nginx's X-Real-IP. The server only
-// listens on loopback behind nginx, so these headers come from the proxy.
+// clientIP returns the address used for the login lockout: X-Real-IP from
+// nginx. The server only listens on loopback behind nginx, and the shipped
+// nginx config blanks CF-Connecting-IP (cdn is DNS-only, so a client could
+// forge it); if you put Cloudflare's proxy in front, forward it instead.
 func clientIP(r *http.Request) string {
 	for _, h := range []string{"CF-Connecting-IP", "X-Real-IP"} {
 		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
