@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+  push:
+    # Deploy on every push to main (including PR merges), so the VM never lags behind main.
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-private-cdn
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH in and redeploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ORACLE_VM_HOST }}
+          username: ${{ secrets.ORACLE_VM_USER }}
+          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
+          # Optional: pins the server's host key. Leave the secret unset to skip.
+          fingerprint: ${{ secrets.ORACLE_VM_FINGERPRINT }}
+          # The deploy key is restricted on the server to run deploy/deploy.sh
+          # (installed as /usr/local/bin/private-cdn-deploy) whatever is sent here.
+          script: private-cdn-deploy
