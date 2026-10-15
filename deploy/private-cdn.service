@@ -1,0 +1,31 @@
+[Unit]
+Description=private-cdn file server (cdn.axiosiiitl.dev)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+EnvironmentFile=/etc/private-cdn.env
+ExecStart=/usr/local/bin/private-cdn
+Restart=on-failure
+RestartSec=3
+StateDirectory=private-cdn
+StateDirectoryMode=0700
+UMask=0022
+
+# Hardening: the only writable paths are the files and the state directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/srv/files
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

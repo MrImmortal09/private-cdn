@@ -1,0 +1,167 @@
+{{define "head"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{{.}}</title>
+<style>
+:root{--bg:#fafafa;--card:#fff;--fg:#1b1b1b;--mute:#6b6b6b;--line:#e5e5e5;--acc:#2563eb;--btn:#f1f1f1;--bad:#c62828;--ok:#2e7d32}
+@media (prefers-color-scheme:dark){:root{--bg:#121212;--card:#1a1a1a;--fg:#e9e9e9;--mute:#9b9b9b;--line:#2b2b2b;--acc:#80a4ff;--btn:#262626;--bad:#ef6b6b;--ok:#6fcf73}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:18px 16px 48px}
+a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+header{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}
+header nav{display:flex;gap:14px;align-items:center}
+.crumbs{color:var(--mute);word-break:break-all}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+table{width:100%;border-collapse:collapse}
+td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:middle;word-break:break-all}
+tr:last-child td{border-bottom:0}
+td.sz{color:var(--mute);white-space:nowrap;text-align:right;width:1%}
+td.act{white-space:nowrap;width:1%;text-align:right}
+.dir{font-weight:600}
+.tag{font-size:12px;margin-left:8px;color:var(--mute)}
+.muted{color:var(--mute)}
+button,input,textarea,select{font:inherit;color:var(--fg)}
+button{background:var(--btn);border:1px solid var(--line);border-radius:7px;padding:5px 11px;cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button.link{background:none;border:0;padding:0;color:var(--acc)}
+button.del{color:var(--bad)}
+input[type=text],input[type=password],textarea{width:100%;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px 10px}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}
+.bar>i{display:block;height:100%;background:var(--acc);width:0}
+.err{color:var(--bad)} .ok{color:var(--ok)}
+.login{max-width:340px;margin:12vh auto 0}
+.login label{display:block;margin:12px 0 4px;color:var(--mute);font-size:14px}
+form.inline{display:inline}
+</style></head><body><main>{{end}}
+
+{{define "foot"}}</main>
+<script>
+async function post(url, body){
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||r.statusText);
+  return j;
+}
+document.addEventListener('click', async e=>{
+  const b = e.target.closest('button[data-copy]'); if(!b) return;
+  try{ await navigator.clipboard.writeText(b.dataset.copy); b.textContent='Copied'; }
+  catch{ prompt('Share link', b.dataset.copy); }
+  setTimeout(()=>b.textContent='Copy link',1500);
+});
+</script>
+</body></html>{{end}}
+
+{{define "topnav"}}<nav><a href="/files/">Files</a><a href="/fetch">Fetch</a>
+<form class="inline" method="post" action="/logout"><button class="link" type="submit">Log out</button></form></nav>{{end}}
+
+{{define "login"}}{{template "head" "Sign in"}}
+<div class="login card">
+  <h2 style="margin:0 0 6px">Sign in</h2>
+  {{with .Error}}<p class="err">{{.}}</p>{{end}}
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{.Next}}">
+    <label for="u">Username</label><input id="u" type="text" name="username" autocomplete="username" required autofocus>
+    <label for="p">Password</label><input id="p" type="password" name="password" autocomplete="current-password" required>
+    <p><button class="primary" type="submit" style="width:100%">Sign in</button></p>
+  </form>
+</div>
+{{template "foot"}}{{end}}
+
+{{define "browse"}}{{template "head" (or .Rel "files")}}
+<header>
+  <div class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}} / {{end}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}}</div>
+  {{template "topnav"}}
+</header>
+{{if .Writable}}
+<div class="tools">
+  <label><button type="button" onclick="document.getElementById('up').click()">Upload</button></label>
+  <input id="up" type="file" multiple hidden>
+  <button type="button" id="mk">New folder</button>
+  <a href="/fetch?folder={{.Rel}}">Fetch links into this folder</a>
+  <span id="upmsg" class="muted"></span>
+</div>
+<div id="upbar" class="bar" hidden><i></i></div>
+{{end}}
+<div class="card">
+<table>
+{{range .Entries}}
+<tr>
+  <td>{{if .IsDir}}<a class="dir" href="{{.Href}}">{{.Name}}/</a>{{else}}<a href="{{.Href}}">{{.Name}}</a>{{if .IsZip}}<a class="tag" href="{{.Href}}/">open zip</a>{{end}}{{end}}</td>
+  <td class="sz">{{if not .IsDir}}{{size .Size}}{{end}}</td>
+  <td class="act">{{if .Share}}<button data-copy="{{.Share}}">Copy link</button>{{end}}
+    {{if .Deletable}}<button class="del" data-del="{{.Name}}" title="Delete">✕</button>{{end}}</td>
+</tr>
+{{else}}<tr><td class="muted">Empty folder</td></tr>{{end}}
+</table>
+</div>
+<script>
+const REL = {{.Rel}};
+const join = n => REL ? REL + '/' + n : n;
+document.addEventListener('click', async e=>{
+  const b = e.target.closest('button[data-del]'); if(!b) return;
+  if(!confirm('Delete "'+b.dataset.del+'"? This cannot be undone.')) return;
+  try{ await post('/api/delete',{Path:join(b.dataset.del)}); location.reload(); }catch(err){ alert(err.message); }
+});
+const mk = document.getElementById('mk');
+if(mk) mk.onclick = async ()=>{
+  const n = prompt('Folder name'); if(!n) return;
+  try{ await post('/api/mkdir',{Dir:REL,Name:n}); location.reload(); }catch(err){ alert(err.message); }
+};
+const up = document.getElementById('up');
+if(up) up.onchange = ()=>{
+  if(!up.files.length) return;
+  const fd = new FormData(); for(const f of up.files) fd.append('file', f, f.name);
+  const x = new XMLHttpRequest(), bar = document.getElementById('upbar'), msg = document.getElementById('upmsg');
+  bar.hidden = false;
+  x.upload.onprogress = e=>{ if(e.lengthComputable){ bar.firstChild.style.width = (100*e.loaded/e.total)+'%'; msg.textContent = Math.round(100*e.loaded/e.total)+'%'; } };
+  x.onload = ()=>{ if(x.status===200) location.reload(); else { msg.textContent = 'Upload failed: '+(JSON.parse(x.responseText||'{}').error||x.status); msg.className='err'; } };
+  x.onerror = ()=>{ msg.textContent = 'Upload failed'; msg.className='err'; };
+  x.open('POST','/api/upload?dir='+encodeURIComponent(REL)); x.send(fd);
+};
+</script>
+{{template "foot"}}{{end}}
+
+{{define "fetch"}}{{template "head" "Fetch"}}
+<header><div class="crumbs"><a href="/files/">files</a> / fetch</div>{{template "topnav"}}</header>
+<div class="card">
+  <p class="muted" style="margin-top:0">Paste Google Drive, Dropbox or direct download links (one or many). Google Drive files must be shared as "Anyone with the link". Existing files are never overwritten.</p>
+  <textarea id="links" rows="5" placeholder="https://drive.google.com/file/d/…&#10;https://example.com/show.zip"></textarea>
+  <div class="tools" style="margin-top:10px">
+    <input id="folder" type="text" list="folders" placeholder="Folder (empty = top level)" value="{{.Folder}}" style="max-width:320px">
+    <datalist id="folders">{{range .Folders}}<option value="{{.}}">{{end}}</datalist>
+    <button class="primary" id="go">Download</button>
+    <span id="msg" class="muted"></span>
+  </div>
+</div>
+<h3>Downloads</h3>
+<div class="card"><table id="jobs"><tr><td class="muted">Nothing yet</td></tr></table></div>
+<script>
+const fmt = n=>{const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<4){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
+const esc = s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+document.getElementById('go').onclick = async ()=>{
+  const m = document.getElementById('msg');
+  try{ const r = await post('/fetch/api/jobs',{Links:document.getElementById('links').value,Folder:document.getElementById('folder').value});
+       m.textContent = r.added.length+' added'; m.className='ok'; document.getElementById('links').value=''; load(); }
+  catch(err){ m.textContent = err.message; m.className='err'; }
+};
+async function load(){
+  const r = await fetch('/fetch/api/jobs'); if(!r.ok) return;
+  const jobs = await r.json(); const t = document.getElementById('jobs');
+  if(!jobs.length){ t.innerHTML='<tr><td class="muted">Nothing yet</td></tr>'; return; }
+  t.innerHTML = jobs.map(j=>{
+    const pct = j.total>0 ? Math.min(100,100*j.done/j.total) : 0;
+    let state = j.status;
+    if(j.status==='downloading') state = j.total>0 ? pct.toFixed(0)+'% of '+fmt(j.total) : fmt(j.done);
+    if(j.status==='error') state = '<span class="err">'+esc(j.error)+'</span>';
+    if(j.status==='done') state = '<span class="ok">done</span> · '+fmt(j.done);
+    return '<tr><td><div>'+esc(j.name||j.url)+'</div><div class="muted" style="font-size:13px">'+esc(j.folder?j.folder+'/':'top level')+' · '+state+'</div>'
+      +(j.status==='downloading'&&j.total>0?'<div class="bar"><i style="width:'+pct+'%"></i></div>':'')+'</td>'
+      +'<td class="act">'+(j.link?'<button data-copy="'+esc(j.link)+'">Copy link</button>':'')+'</td></tr>';
+  }).join('');
+}
+load(); setInterval(load, 1500);
+</script>
+{{template "foot"}}{{end}}

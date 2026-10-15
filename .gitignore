@@ -1,21 +1,3 @@
-# Secrets and keys (generated on the server by scripts/setup-secrets.sh)
-authelia/secrets/
-
-# Authelia runtime state and your user list
-authelia/config/users.yml
-authelia/config/db.sqlite3*
-authelia/config/notification.txt
-
-# FileBrowser: real config holds the OIDC client secret; plus its database and cache
-filebrowser/config.yaml
-filebrowser/*.db
-filebrowser/tmp/
-
-# Caddy certificates and state
-caddy/data/
-caddy/config/
-
-# Local leftovers
+/private-cdn
 *.bak.*
-__pycache__/
 .env
