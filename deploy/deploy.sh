@@ -10,6 +10,7 @@ REMOTE="${DEPLOY_REMOTE:-upstream}"   # https://github.com/MrImmortal09/private-
 BRANCH="${DEPLOY_BRANCH:-main}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8090/healthz}"
 BIN=/usr/local/bin/private-cdn
+UNIT=/etc/systemd/system/private-cdn.service
 GO=/usr/local/go/bin/go
 export GOCACHE="$HOME/.cache/go-build" GOPATH="$HOME/go"
 
@@ -29,9 +30,12 @@ trap 'rm -f "$tmp"' EXIT
 echo "==> install"
 [ -x "$BIN" ] && sudo cp -p "$BIN" "$BIN.prev"
 sudo install -m 755 "$tmp" "$BIN"
-if ! cmp -s deploy/private-cdn.service /etc/systemd/system/private-cdn.service; then
-  sudo install -m 644 deploy/private-cdn.service /etc/systemd/system/private-cdn.service
+unit_changed=false
+if ! cmp -s deploy/private-cdn.service "$UNIT"; then
+  [ -f "$UNIT" ] && sudo cp -p "$UNIT" "$UNIT.prev"
+  sudo install -m 644 deploy/private-cdn.service "$UNIT"
   sudo systemctl daemon-reload
+  unit_changed=true
 fi
 sudo install -m 755 deploy/deploy.sh /usr/local/bin/private-cdn-deploy
 
@@ -47,8 +51,12 @@ done
 
 echo "!! health check failed; rolling back" >&2
 sudo journalctl -u private-cdn -n 30 --no-pager >&2 || true
+if $unit_changed && [ -f "$UNIT.prev" ]; then
+  sudo install -m 644 "$UNIT.prev" "$UNIT"
+  sudo systemctl daemon-reload
+fi
 if [ -x "$BIN.prev" ]; then
   sudo install -m 755 "$BIN.prev" "$BIN"
-  sudo systemctl restart private-cdn
 fi
+sudo systemctl restart private-cdn
 exit 1

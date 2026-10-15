@@ -102,6 +102,9 @@ type zipArchive struct {
 	size  int64
 	files map[string]*zip.File // cleaned name -> entry (files only)
 	dirs  map[string]bool      // every folder implied by the entries
+
+	refs    int  // open() calls not yet release()d; guarded by zipCache.mu
+	dropped bool // no longer in the cache: close once refs reaches 0
 }
 
 type zipCache struct {
@@ -112,9 +115,9 @@ type zipCache struct {
 
 func newZipCache(max int) *zipCache { return &zipCache{max: max, m: map[string]*zipArchive{}} }
 
-// open returns the parsed zip, reusing it while the file is unchanged. Old
-// entries are dropped, not closed, because a stream may still be reading them;
-// the os.File finalizer closes them.
+// open returns the parsed zip, reusing it while the file is unchanged. Every
+// open must be paired with release once its reads are done; an archive dropped
+// from the cache is closed when its last reader releases it.
 func (c *zipCache) open(p string) (*zipArchive, error) {
 	fi, err := os.Stat(p)
 	if err != nil {
@@ -123,6 +126,7 @@ func (c *zipCache) open(p string) (*zipArchive, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a := c.m[p]; a != nil && a.mod.Equal(fi.ModTime()) && a.size == fi.Size() {
+		a.refs++
 		return a, nil
 	}
 	f, err := os.Open(p)
@@ -151,14 +155,36 @@ func (c *zipCache) open(p string) (*zipArchive, error) {
 			a.dirs[d] = true
 		}
 	}
-	if len(c.m) >= c.max {
-		for k := range c.m {
-			delete(c.m, k)
+	if old := c.m[p]; old != nil {
+		c.drop(p, old)
+	} else if len(c.m) >= c.max {
+		for k, old := range c.m {
+			c.drop(k, old)
 			break
 		}
 	}
 	c.m[p] = a
+	a.refs++
 	return a, nil
+}
+
+// drop removes a from the cache, closing it unless a reader still holds it.
+// c.mu must be held.
+func (c *zipCache) drop(p string, a *zipArchive) {
+	delete(c.m, p)
+	a.dropped = true
+	if a.refs == 0 {
+		a.f.Close()
+	}
+}
+
+func (c *zipCache) release(a *zipArchive) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a.refs--
+	if a.refs == 0 && a.dropped {
+		a.f.Close()
+	}
 }
 
 type entry struct {
@@ -294,6 +320,7 @@ func (s *server) serveTarget(w http.ResponseWriter, r *http.Request, t *target) 
 	if err != nil {
 		return false
 	}
+	defer s.zips.release(a)
 	zf := a.files[t.inner]
 	if zf == nil {
 		return false
@@ -363,12 +390,14 @@ func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		entries = a.children("")
+		s.zips.release(a)
 	case t.inZip:
 		a, err := s.zips.open(t.fsPath)
 		if err != nil {
 			http.Error(w, "not a readable zip: "+err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
+		defer s.zips.release(a)
 		if a.files[t.inner] != nil {
 			s.serveTarget(w, r, t)
 			return
@@ -456,7 +485,11 @@ func (s *server) isFile(rel string) bool {
 		return true
 	}
 	a, err := s.zips.open(t.fsPath)
-	return err == nil && a.files[t.inner] != nil
+	if err != nil {
+		return false
+	}
+	defer s.zips.release(a)
+	return a.files[t.inner] != nil
 }
 
 func (s *server) handleLink(w http.ResponseWriter, r *http.Request) {
@@ -488,17 +521,27 @@ func cleanName(name string) (string, error) {
 	return name, nil
 }
 
-// uniquePath returns dir/name, or dir/name (2).ext etc. if it already exists.
-func uniquePath(dir, name string) string {
+// moveToFreeName moves file tmp to dir/name, or dir/name (2).ext etc. if that
+// is taken. It claims the name with a hard link, which fails if the name
+// exists, so two writers finishing at once can never overwrite each other.
+func moveToFreeName(tmp, dir, name string) (string, error) {
 	ext := path.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
-	p := filepath.Join(dir, name)
-	for i := 2; ; i++ {
-		if _, err := os.Lstat(p); errors.Is(err, os.ErrNotExist) {
-			return p
+	for i := 1; i <= 10000; i++ {
+		p := filepath.Join(dir, name)
+		if i > 1 {
+			p = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
 		}
-		p = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, i, ext))
+		err := os.Link(tmp, p)
+		if err == nil {
+			os.Remove(tmp)
+			return p, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
 	}
+	return "", errors.New("too many files with that name")
 }
 
 func (s *server) relOf(fsPath string) string {
@@ -568,8 +611,8 @@ func writeAtomically(dir, name string, src io.Reader) (string, error) {
 		return "", err
 	}
 	os.Chmod(tmp.Name(), 0o644)
-	dest := uniquePath(dir, name)
-	if err := os.Rename(tmp.Name(), dest); err != nil {
+	dest, err := moveToFreeName(tmp.Name(), dir, name)
+	if err != nil {
 		os.Remove(tmp.Name())
 		return "", err
 	}

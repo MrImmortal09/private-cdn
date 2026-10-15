@@ -204,24 +204,33 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.sameOrigin(r) {
+		http.Error(w, "cross-site request refused", http.StatusForbidden)
+		return
+	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 		Secure: strings.HasPrefix(s.cfg.PublicURL, "https://"), SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 // clientIP returns the address used for the login lockout: X-Real-IP from
-// nginx. The server only listens on loopback behind nginx, and the shipped
-// nginx config blanks CF-Connecting-IP (cdn is DNS-only, so a client could
-// forge it); if you put Cloudflare's proxy in front, forward it instead.
+// nginx. Proxy headers are only trusted when the request comes from loopback
+// (nginx), so a client reaching the port directly can't pick its own address.
+// The shipped nginx config blanks CF-Connecting-IP (cdn is DNS-only, so a
+// client could forge it); if you put Cloudflare's proxy in front, forward it
+// instead.
 func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return host
+	}
 	for _, h := range []string{"CF-Connecting-IP", "X-Real-IP"} {
 		if v := strings.TrimSpace(r.Header.Get(h)); v != "" {
 			return v
 		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
 	}
 	return host
 }

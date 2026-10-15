@@ -190,10 +190,12 @@ func makePlayable(ctx context.Context, file string) (newPath, note string, err e
 			return file, note, err
 		}
 		dest := filepath.Join(dir, mp4Name(name))
-		if dest != file {
-			dest = uniquePath(dir, mp4Name(name))
+		if dest == file {
+			err = os.Rename(tmp, dest) // replacing the original is the point
+		} else {
+			dest, err = moveToFreeName(tmp, dir, mp4Name(name))
 		}
-		if err := os.Rename(tmp, dest); err != nil {
+		if err != nil {
 			os.Remove(tmp)
 			return file, "", err
 		}

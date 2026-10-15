@@ -275,9 +275,21 @@ func TestDriveAndDropboxLinks(t *testing.T) {
 	}
 	page := `<form id="download-form" action="https://drive.usercontent.google.com/download" method="get">
 <input type="hidden" name="id" value="ID1"><input type="hidden" name="confirm" value="t"><input type="hidden" name="uuid" value="U-1"></form>`
-	got, ok := driveConfirm(page)
+	base, _ := url.Parse("https://drive.google.com/uc?export=download&id=ID1")
+	got, ok := driveConfirm(base, page)
 	if !ok || !strings.Contains(got, "uuid=U-1") || !strings.Contains(got, "id=ID1") {
 		t.Fatalf("drive confirm: %s", got)
+	}
+	// Attributes in another order, single quotes, and a relative action.
+	page = `<form method=get action='/download?x=1&amp;y=2' id='download-form'>
+<input value="U-2" name="uuid" type="hidden"></form><input type="hidden" name="outside" value="no">`
+	got, ok = driveConfirm(base, page)
+	if !ok || !strings.HasPrefix(got, "https://drive.google.com/download?") ||
+		!strings.Contains(got, "uuid=U-2") || !strings.Contains(got, "y=2") || strings.Contains(got, "outside") {
+		t.Fatalf("drive confirm (reordered, relative): %s", got)
+	}
+	if _, ok := driveConfirm(base, `<form id="other" action="/x"></form>`); ok {
+		t.Fatal("a page without the download form must not match")
 	}
 }
 
@@ -289,5 +301,85 @@ func TestFetchRefusesPrivateAddresses(t *testing.T) {
 	}
 	if refusePrivate("tcp", "1.1.1.1:443", nil) != nil {
 		t.Fatal("public address refused")
+	}
+}
+
+func TestConcurrentWritesNeverOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	const n = 20
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := writeAtomically(dir, "same.bin", strings.NewReader("x"))
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	des, _ := os.ReadDir(dir)
+	if len(des) != n {
+		t.Fatalf("%d files for %d writes", len(des), n)
+	}
+}
+
+func TestLogoutRefusesCrossSite(t *testing.T) {
+	_, h, _ := newTestServer(t)
+	c := login(t, h)
+	rec := do(h, "POST", "/logout", nil, map[string]string{"Origin": "https://evil.example"}, c)
+	if rec.Code != http.StatusForbidden || strings.Contains(rec.Header().Get("Set-Cookie"), "Max-Age=0") {
+		t.Fatalf("cross-site logout: %d %q", rec.Code, rec.Header().Get("Set-Cookie"))
+	}
+	if rec := do(h, "POST", "/logout", nil, map[string]string{"Origin": testURL}, c); rec.Code != http.StatusSeeOther {
+		t.Fatalf("logout: %d", rec.Code)
+	}
+}
+
+func TestClientIPTrustsHeadersOnlyFromLoopback(t *testing.T) {
+	r := httptest.NewRequest("POST", "/login", nil)
+	r.Header.Set("X-Real-IP", "203.0.113.9")
+	r.RemoteAddr = "198.51.100.7:5555"
+	if got := clientIP(r); got != "198.51.100.7" {
+		t.Fatalf("direct client picked its own IP: %s", got)
+	}
+	r.RemoteAddr = "127.0.0.1:5555"
+	if got := clientIP(r); got != "203.0.113.9" {
+		t.Fatalf("behind nginx: %s", got)
+	}
+}
+
+func TestZipCacheClosesDroppedArchiveAfterRelease(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(name string) string {
+		p := filepath.Join(dir, name)
+		f, _ := os.Create(p)
+		zw := zip.NewWriter(f)
+		w, _ := zw.Create("a.txt")
+		w.Write([]byte("hi"))
+		zw.Close()
+		f.Close()
+		return p
+	}
+	c := newZipCache(1)
+	a, err := c.open(mk("one.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.open(mk("two.zip")) // evicts one.zip while it is still being read
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.f.Stat(); err != nil {
+		t.Fatal("evicted archive closed while still in use")
+	}
+	c.release(a)
+	if _, err := a.f.Stat(); err == nil {
+		t.Fatal("evicted archive not closed after its last release")
+	}
+	c.release(b)
+	if _, err := b.f.Stat(); err != nil {
+		t.Fatal("cached archive closed")
 	}
 }

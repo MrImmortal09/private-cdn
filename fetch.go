@@ -195,23 +195,50 @@ func directURL(u *url.URL) (string, bool) {
 }
 
 var (
-	formAction  = regexp.MustCompile(`(?is)<form[^>]+id="download-form"[^>]+action="([^"]+)"`)
-	hiddenInput = regexp.MustCompile(`(?is)<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"`)
+	formTag  = regexp.MustCompile(`(?is)<form\b[^>]*>`)
+	inputTag = regexp.MustCompile(`(?is)<input\b[^>]*>`)
+	attrRe   = regexp.MustCompile(`(?is)\b([a-z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))`)
 )
 
-// driveConfirm follows Google Drive's "can't scan this file for viruses" page.
-func driveConfirm(page string) (string, bool) {
-	m := formAction.FindStringSubmatch(page)
-	if m == nil {
+// attrs parses a tag's attributes, in any order and quoting.
+func attrs(tag string) map[string]string {
+	m := map[string]string{}
+	for _, a := range attrRe.FindAllStringSubmatch(tag, -1) {
+		m[strings.ToLower(a[1])] = html.UnescapeString(a[2] + a[3] + a[4])
+	}
+	return m
+}
+
+// driveConfirm follows Google Drive's "can't scan this file for viruses" page,
+// served from base: it submits the download form's hidden fields to its action.
+func driveConfirm(base *url.URL, page string) (string, bool) {
+	var form map[string]string
+	var body string
+	for _, loc := range formTag.FindAllStringIndex(page, -1) {
+		if a := attrs(page[loc[0]:loc[1]]); a["id"] == "download-form" {
+			form, body = a, page[loc[1]:]
+			break
+		}
+	}
+	if form == nil || form["action"] == "" {
 		return "", false
 	}
-	u, err := url.Parse(html.UnescapeString(m[1]))
+	if end := strings.Index(strings.ToLower(body), "</form>"); end >= 0 {
+		body = body[:end]
+	}
+	u, err := url.Parse(form["action"])
 	if err != nil {
 		return "", false
 	}
+	u = base.ResolveReference(u)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", false
+	}
 	q := u.Query()
-	for _, in := range hiddenInput.FindAllStringSubmatch(page, -1) {
-		q.Set(html.UnescapeString(in[1]), html.UnescapeString(in[2]))
+	for _, tag := range inputTag.FindAllString(body, -1) {
+		if a := attrs(tag); strings.EqualFold(a["type"], "hidden") && a["name"] != "" {
+			q.Set(a["name"], a["value"])
+		}
 	}
 	u.RawQuery = q.Encode()
 	return u.String(), true
@@ -252,7 +279,7 @@ func (f *fetcher) download(j *job) (string, error) {
 	if isDrive && isHTML(resp) {
 		page, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
-		next, ok := driveConfirm(string(page))
+		next, ok := driveConfirm(resp.Request.URL, string(page))
 		if !ok {
 			return "", errors.New("Google Drive did not return the file: share it as \"Anyone with the link\" (folders are not supported)")
 		}
