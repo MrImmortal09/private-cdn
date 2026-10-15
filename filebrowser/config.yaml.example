@@ -1,0 +1,37 @@
+# scripts/setup-secrets.sh copies this to config.yaml (gitignored) and fills in
+# the OIDC client secret. FileBrowser Quantum validates this file strictly: an
+# unknown or misplaced key stops the container, and the log names the key.
+server:
+  cacheDir: '/home/filebrowser/data/tmp'
+  sources:
+    - path: '/srv'
+      name: 'Files'
+      config:
+        defaultEnabled: true
+
+http:
+  port: 80
+  baseURL: '/'
+  externalUrl: 'https://index.axiosiiitl.dev'
+  trustProxyHeaders: true
+
+auth:
+  methods:
+    password:
+      # Leave enabled until "Sign in with Authelia" works, then set to false.
+      enabled: true
+      signup: false
+    oidc:
+      enabled: true
+      clientId: 'filebrowser'
+      clientSecret: '__FILEBROWSER_CLIENT_SECRET__'
+      issuerUrl: 'https://auth.axiosiiitl.dev'
+      scopes: 'openid email profile groups'
+      userIdentifier: 'preferred_username'
+      groupsClaim: 'groups'
+      adminGroup: 'admin'
+
+userDefaults:
+  account:
+    permissions:
+      share: true

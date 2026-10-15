@@ -1,0 +1,30 @@
+# Every site that imports this snippet requires an Authelia login.
+(authelia) {
+	forward_auth authelia:9091 {
+		uri /api/authz/forward-auth
+		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+	}
+}
+
+# Login portal and OIDC issuer.
+auth.axiosiiitl.dev {
+	reverse_proxy authelia:9091
+}
+
+# FileBrowser Quantum. No forward_auth here on purpose: FileBrowser signs you in
+# through Authelia itself (OIDC), and guest share links must work without an account.
+index.axiosiiitl.dev {
+	reverse_proxy filebrowser:80
+}
+
+# Direct file links, including files inside .zip archives.
+cdn.axiosiiitl.dev {
+	import authelia
+	reverse_proxy rclone:8080
+}
+
+# Paste-a-link downloader.
+fetch.axiosiiitl.dev {
+	import authelia
+	reverse_proxy fetcher:8000
+}
