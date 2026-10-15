@@ -21,6 +21,7 @@ td.sz{color:var(--mute);white-space:nowrap;text-align:right;width:1%}
 td.act{white-space:nowrap;width:1%;text-align:right}
 .dir{font-weight:600}
 .tag{font-size:12px;margin-left:8px;color:var(--mute)}
+a.dl{margin-right:10px;font-size:14px}
 .muted{color:var(--mute)}
 button,input,textarea,select{font:inherit;color:var(--fg)}
 button{background:var(--btn);border:1px solid var(--line);border-radius:7px;padding:5px 11px;cursor:pointer}
@@ -89,9 +90,10 @@ document.addEventListener('click', async e=>{
 <table>
 {{range .Entries}}
 <tr>
-  <td>{{if .IsDir}}<a class="dir" href="{{.Href}}">{{.Name}}/</a>{{else}}<a href="{{.Href}}">{{.Name}}</a>{{if .IsZip}}<a class="tag" href="{{.Href}}/">open zip</a>{{end}}{{end}}</td>
+  <td>{{if .IsDir}}<a class="dir" href="{{.Href}}">{{.Name}}/</a>{{else if .IsZip}}<a class="dir" href="{{.Href}}/">{{.Name}}</a><span class="tag">zip</span>{{else}}<a href="{{.Href}}">{{.Name}}</a>{{end}}</td>
   <td class="sz">{{if not .IsDir}}{{size .Size}}{{end}}</td>
-  <td class="act">{{if .Share}}<button data-copy="{{.Share}}">Copy link</button>{{end}}
+  <td class="act">{{if not .IsDir}}<a class="dl" href="{{.Href}}?download=1" download>Download</a>{{end}}
+    {{if .Share}}<button data-copy="{{.Share}}">Copy link</button>{{end}}
     {{if .Deletable}}<button class="del" data-del="{{.Name}}" title="Delete">✕</button>{{end}}</td>
 </tr>
 {{else}}<tr><td class="muted">Empty folder</td></tr>{{end}}

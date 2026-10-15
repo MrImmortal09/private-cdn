@@ -142,6 +142,16 @@ func TestShareLinksAndZipStreaming(t *testing.T) {
 		t.Fatalf("zip listing: %d", rec.Code)
 	}
 
+	// Clicking a zip opens it; Download forces an attachment.
+	rec = do(h, "GET", "/files/", nil, nil, c)
+	if !strings.Contains(rec.Body.String(), `href="/files/show.zip/"`) || !strings.Contains(rec.Body.String(), `href="/files/show.zip?download=1"`) {
+		t.Fatal("zip should link to its folder view, with a separate Download link")
+	}
+	rec = do(h, "GET", "/files/show.zip?download=1", nil, nil, c)
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("download: %d %q", rec.Code, rec.Header().Get("Content-Disposition"))
+	}
+
 	// Share link: no cookie needed, Range works on a stored entry.
 	link := s.shares.url(testURL, "show.zip/s1/ep1.mp4")
 	path := strings.TrimPrefix(link, testURL)

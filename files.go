@@ -264,7 +264,11 @@ func serveBytes(w http.ResponseWriter, r *http.Request, name string, mod time.Ti
 	} else {
 		h.Set("Content-Type", "application/octet-stream")
 	}
-	h.Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
+	disposition := "inline"
+	if r.URL.Query().Has("download") {
+		disposition = "attachment"
+	}
+	h.Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
 	// Files are user content: never let an uploaded .html run as this site.
 	h.Set("Content-Security-Policy", "sandbox")
 	http.ServeContent(w, r, name, mod, rs)
