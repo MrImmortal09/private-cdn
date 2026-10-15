@@ -30,13 +30,17 @@ type job struct {
 	ID     string    `json:"id"`
 	URL    string    `json:"url"`
 	Folder string    `json:"folder"`
-	Status string    `json:"status"` // queued, downloading, done, error
+	Status string    `json:"status"` // queued, downloading, converting, done, error
 	Name   string    `json:"name"`
 	Done   int64     `json:"done"`
 	Total  int64     `json:"total"`
 	Error  string    `json:"error,omitempty"`
 	Link   string    `json:"link,omitempty"`
 	Added  time.Time `json:"added"`
+	// Convert makes videos (or videos inside a zip) browser-playable after
+	// the download; Note says what that did.
+	Convert bool   `json:"convert"`
+	Note    string `json:"note,omitempty"`
 }
 
 type fetcher struct {
@@ -92,10 +96,10 @@ func refusePrivate(network, address string, _ syscall.RawConn) error {
 	return nil
 }
 
-func (f *fetcher) add(rawURL, folder string) *job {
+func (f *fetcher) add(rawURL, folder string, convert bool) *job {
 	id := make([]byte, 5)
 	rand.Read(id)
-	j := &job{ID: hex.EncodeToString(id), URL: rawURL, Folder: folder, Status: "queued", Added: time.Now()}
+	j := &job{ID: hex.EncodeToString(id), URL: rawURL, Folder: folder, Status: "queued", Added: time.Now(), Convert: convert}
 	f.mu.Lock()
 	f.jobs = append(f.jobs, j)
 	if len(f.jobs) > maxJobsKept {
@@ -133,10 +137,28 @@ func (f *fetcher) run(j *job) {
 		f.update(j, func(j *job) { j.Status, j.Error = "error", err.Error() })
 		return
 	}
+	note := ""
+	if j.Convert && (isZip(dest) || isVideoName(dest)) {
+		f.update(j, func(j *job) { j.Status, j.Name = "converting", filepath.Base(dest) })
+		dest, note = f.convert(dest)
+	}
 	rel := f.s.relOf(dest)
 	link := f.s.shares.url(f.s.cfg.PublicURL, rel)
-	log.Printf("fetch %s -> %s", j.URL, rel)
-	f.update(j, func(j *job) { j.Status, j.Name, j.Link = "done", filepath.Base(dest), link })
+	log.Printf("fetch %s -> %s %s", j.URL, rel, note)
+	f.update(j, func(j *job) { j.Status, j.Name, j.Link, j.Note = "done", filepath.Base(dest), link, note })
+}
+
+// convert runs makePlayable; a failed conversion keeps the original download.
+func (f *fetcher) convert(file string) (string, string) {
+	if !haveFFmpeg() {
+		return file, "not converted: " + errNoFFmpeg.Error()
+	}
+	newPath, note, err := makePlayable(context.Background(), file)
+	if err != nil {
+		log.Printf("convert %s: %v", f.s.relOf(file), err)
+		return file, "not converted, original kept: " + err.Error()
+	}
+	return newPath, note
 }
 
 // ---------- link types ----------
@@ -325,7 +347,10 @@ func (s *server) handleFetchJobs(w http.ResponseWriter, r *http.Request) {
 var linkRe = regexp.MustCompile(`https?://\S+`)
 
 func (s *server) handleFetchAdd(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Links, Folder string }
+	var req struct {
+		Links, Folder string
+		Convert       bool
+	}
 	if json.NewDecoder(io.LimitReader(r.Body, 256*1024)).Decode(&req) != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
@@ -342,7 +367,7 @@ func (s *server) handleFetchAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	var ids []string
 	for _, l := range links {
-		ids = append(ids, s.fetcher.add(strings.TrimRight(l, ".,;)\"'"), folder).ID)
+		ids = append(ids, s.fetcher.add(strings.TrimRight(l, ".,;)\"'"), folder, req.Convert).ID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"added": ids})
 }

@@ -36,6 +36,8 @@ input[type=text],input[type=password],textarea{width:100%;background:var(--card)
 .login{max-width:340px;margin:12vh auto 0}
 .login label{display:block;margin:12px 0 4px;color:var(--mute);font-size:14px}
 form.inline{display:inline}
+label.check{display:block;margin-top:10px;font-size:14px}
+label.check input{margin-right:6px;vertical-align:-1px}
 </style></head><body><main>{{end}}
 
 {{define "foot"}}</main>
@@ -131,6 +133,8 @@ if(up) up.onchange = ()=>{
 <div class="card">
   <p class="muted" style="margin-top:0">Paste Google Drive, Dropbox or direct download links (one or many). Google Drive files must be shared as "Anyone with the link". Existing files are never overwritten.</p>
   <textarea id="links" rows="5" placeholder="https://drive.google.com/file/d/…&#10;https://example.com/show.zip"></textarea>
+  <label class="check"><input type="checkbox" id="convert"> Make videos browser-playable
+    <span class="muted">— for videos and videos inside zips: keep the video as-is, convert unsupported audio (E-AC-3, AC-3, DTS, TrueHD…) to AAC and MKV to MP4. Zips stay at the same path.</span></label>
   <div class="tools" style="margin-top:10px">
     <input id="folder" type="text" list="folders" placeholder="Folder (empty = top level)" value="{{.Folder}}" style="max-width:320px">
     <datalist id="folders">{{range .Folders}}<option value="{{.}}">{{end}}</datalist>
@@ -145,7 +149,7 @@ const fmt = n=>{const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<4){n/
 const esc = s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 document.getElementById('go').onclick = async ()=>{
   const m = document.getElementById('msg');
-  try{ const r = await post('/fetch/api/jobs',{Links:document.getElementById('links').value,Folder:document.getElementById('folder').value});
+  try{ const r = await post('/fetch/api/jobs',{Links:document.getElementById('links').value,Folder:document.getElementById('folder').value,Convert:document.getElementById('convert').checked});
        m.textContent = r.added.length+' added'; m.className='ok'; document.getElementById('links').value=''; load(); }
   catch(err){ m.textContent = err.message; m.className='err'; }
 };
@@ -158,12 +162,16 @@ async function load(){
     let state = j.status;
     if(j.status==='downloading') state = j.total>0 ? pct.toFixed(0)+'% of '+fmt(j.total) : fmt(j.done);
     if(j.status==='error') state = '<span class="err">'+esc(j.error)+'</span>';
-    if(j.status==='done') state = '<span class="ok">done</span> · '+fmt(j.done);
+    if(j.status==='converting') state = 'making videos browser-playable…';
+    if(j.status==='done') state = '<span class="ok">done</span> · '+fmt(j.done)+(j.note?' · '+esc(j.note):'');
     return '<tr><td><div>'+esc(j.name||j.url)+'</div><div class="muted" style="font-size:13px">'+esc(j.folder?j.folder+'/':'top level')+' · '+state+'</div>'
       +(j.status==='downloading'&&j.total>0?'<div class="bar"><i style="width:'+pct+'%"></i></div>':'')+'</td>'
       +'<td class="act">'+(j.link?'<button data-copy="'+esc(j.link)+'">Copy link</button>':'')+'</td></tr>';
   }).join('');
 }
+const cv = document.getElementById('convert');
+try{ cv.checked = localStorage.getItem('convert')==='1'; }catch{}
+cv.onchange = ()=>{ try{ localStorage.setItem('convert', cv.checked?'1':'0'); }catch{} };
 load(); setInterval(load, 1500);
 </script>
 {{template "foot"}}{{end}}
