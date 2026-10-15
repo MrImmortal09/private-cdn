@@ -63,7 +63,7 @@ func TestMakePlayableVideo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != filepath.Join(dir, "Episode 1.mp4") || !strings.Contains(note, "AAC") {
+	if out != filepath.Join(dir, "Episode 1.mp4") || note != "audio converted to AAC, MKV → MP4" {
 		t.Fatalf("got %s (%s)", out, note)
 	}
 	if _, err := os.Stat(mkv); !os.IsNotExist(err) {

@@ -65,9 +65,10 @@ func ffprobe(ctx context.Context, file string) (*probeResult, error) {
 	return &p, nil
 }
 
-// conversionPlan says whether a file needs fixing and builds the ffmpeg
-// arguments (input and output are appended by the caller).
-func conversionPlan(p *probeResult, name string) (args []string, needed bool) {
+// conversionPlan says whether a file needs fixing, builds the ffmpeg
+// arguments (input and output are appended by the caller) and describes the
+// change for the fetch page.
+func conversionPlan(p *probeResult, name string) (args []string, desc string, needed bool) {
 	video := -1
 	videoCodec := ""
 	var audio, subs []int
@@ -90,13 +91,21 @@ func conversionPlan(p *probeResult, name string) (args []string, needed bool) {
 		}
 	}
 	if video < 0 {
-		return nil, false
+		return nil, "", false
 	}
 	isMP4 := strings.Contains(p.Format.FormatName, "mp4") &&
 		map[string]bool{".mp4": true, ".m4v": true}[strings.ToLower(path.Ext(name))]
 	if audioOK && isMP4 {
-		return nil, false
+		return nil, "", false
 	}
+	var changes []string
+	if !audioOK {
+		changes = append(changes, "audio converted to AAC")
+	}
+	if !isMP4 {
+		changes = append(changes, strings.ToUpper(strings.TrimPrefix(path.Ext(name), "."))+" → MP4")
+	}
+	desc = strings.Join(changes, ", ")
 
 	args = []string{"-map", fmt.Sprintf("0:%d", video)}
 	for _, a := range audio {
@@ -119,27 +128,28 @@ func conversionPlan(p *probeResult, name string) (args []string, needed bool) {
 		args = append(args, "-c:s", "mov_text")
 	}
 	args = append(args, "-movflags", "+faststart", "-f", "mp4")
-	return args, true
+	return args, desc, true
 }
 
-// convertFile writes a browser-playable MP4 of in to out, if in needs it.
-func convertFile(ctx context.Context, in, out, name string) (bool, error) {
+// convertFile writes a browser-playable MP4 of in to out, if in needs it,
+// and says what changed.
+func convertFile(ctx context.Context, in, out, name string) (bool, string, error) {
 	p, err := ffprobe(ctx, in)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
-	args, needed := conversionPlan(p, name)
+	args, desc, needed := conversionPlan(p, name)
 	if !needed {
-		return false, nil
+		return false, "", nil
 	}
 	full := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", in}, args...)
 	full = append(full, out)
 	cmd := exec.CommandContext(ctx, "ffmpeg", full...)
 	if msg, err := cmd.CombinedOutput(); err != nil {
 		os.Remove(out)
-		return false, fmt.Errorf("ffmpeg: %v: %s", err, strings.TrimSpace(lastLine(string(msg))))
+		return false, "", fmt.Errorf("ffmpeg: %v: %s", err, strings.TrimSpace(lastLine(string(msg))))
 	}
-	return true, nil
+	return true, desc, nil
 }
 
 func lastLine(s string) string {
@@ -172,7 +182,7 @@ func makePlayable(ctx context.Context, file string) (newPath, note string, err e
 	case isVideoName(file):
 		dir, name := filepath.Split(file)
 		tmp := filepath.Join(dir, "."+mp4Name(name)+".convert.part")
-		changed, err := convertFile(ctx, file, tmp, name)
+		changed, desc, err := convertFile(ctx, file, tmp, name)
 		if err != nil || !changed {
 			if err == nil {
 				note = "already browser-friendly"
@@ -190,7 +200,7 @@ func makePlayable(ctx context.Context, file string) (newPath, note string, err e
 		if dest != file {
 			os.Remove(file)
 		}
-		return dest, "audio converted to AAC, saved as MP4", nil
+		return dest, desc, nil
 	}
 	return file, "", nil
 }
@@ -228,7 +238,7 @@ func fixZip(ctx context.Context, zipPath string) (int, error) {
 			return 0, fmt.Errorf("%s: %w", zf.Name, err)
 		}
 		out := filepath.Join(work, fmt.Sprintf("out-%d.mp4", i))
-		changed, err := convertFile(ctx, in, out, zf.Name)
+		changed, _, err := convertFile(ctx, in, out, zf.Name)
 		os.Remove(in)
 		if err != nil {
 			return 0, fmt.Errorf("%s: %w", zf.Name, err)
