@@ -34,6 +34,7 @@ type config struct {
 	PublicURL    string // e.g. https://cdn.axiosiiitl.dev (used for links and origin checks)
 	User         string
 	PasswordHash string
+	MetricsAddr  string // Prometheus /metrics listener; empty = off
 }
 
 type server struct {
@@ -45,6 +46,7 @@ type server struct {
 	fetcher    *fetcher
 	limiter    *loginLimiter
 	tmpl       *template.Template
+	metrics    *metrics
 }
 
 func env(key, def string) string {
@@ -72,10 +74,18 @@ func main() {
 		PublicURL:    strings.TrimRight(env("CDN_PUBLIC_URL", "https://cdn.axiosiiitl.dev"), "/"),
 		User:         os.Getenv("CDN_USER"),
 		PasswordHash: os.Getenv("CDN_PASSWORD_HASH"),
+		MetricsAddr:  os.Getenv("CDN_METRICS_ADDR"),
 	}
 	s, err := newServer(cfg)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if cfg.MetricsAddr != "" {
+		if _, err := s.metrics.serve(cfg.MetricsAddr, s); err != nil {
+			log.Fatal("CDN_METRICS_ADDR: ", err)
+		}
+		log.Printf("metrics on %s/metrics", cfg.MetricsAddr)
 	}
 
 	srv := &http.Server{
@@ -123,6 +133,7 @@ func newServer(cfg config) (*server, error) {
 		zips:       newZipCache(32),
 		limiter:    newLoginLimiter(),
 		tmpl:       tmpl,
+		metrics:    newMetrics(),
 	}
 	s.fetcher = newFetcher(s, 3)
 	return s, nil
@@ -150,7 +161,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /fetch/api/jobs", s.auth(http.HandlerFunc(s.handleFetchJobs)))
 	mux.Handle("POST /fetch/api/jobs", s.auth(http.HandlerFunc(s.handleFetchAdd)))
 
-	return securityHeaders(mux)
+	return s.metrics.wrap(securityHeaders(mux))
 }
 
 func securityHeaders(next http.Handler) http.Handler {
