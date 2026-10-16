@@ -53,6 +53,7 @@ Adjust `User=` in the service file and the certificate paths in the nginx file t
 | `CDN_PUBLIC_URL` | `https://cdn.axiosiiitl.dev` | Used in share links and for the same-origin check |
 | `CDN_ADDR` | `127.0.0.1:8090` | Listen address; keep it on loopback behind nginx |
 | `CDN_STATE_DIR` | `/var/lib/private-cdn` | Server secret and the share-link index |
+| `CDN_METRICS_ADDR` | – | Prometheus `/metrics` listener, e.g. `127.0.0.1:9466`; keep it on loopback. Unset = off |
 
 ## Notes
 

@@ -383,3 +383,36 @@ func TestZipCacheClosesDroppedArchiveAfterRelease(t *testing.T) {
 		t.Fatal("cached archive closed")
 	}
 }
+
+func TestMetricsCountByPattern(t *testing.T) {
+	s, h, root := newTestServer(t)
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	do(h, "GET", "/healthz", nil, nil, nil)
+	do(h, "GET", "/share/secret-code-123", nil, nil, nil)
+	do(h, "GET", "/files/a.txt", nil, nil, nil) // not logged in
+
+	var b strings.Builder
+	s.metrics.write(&b, s)
+	out := b.String()
+	for _, want := range []string{
+		`cdn_http_requests_total{pattern="GET /healthz",code="200"} 1`,
+		`cdn_http_response_bytes_total{pattern="GET /healthz",code="200"} 2`,
+		`cdn_fetch_jobs{status="queued"} 0`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, `pattern="GET /share/{code}"`) || strings.Contains(out, "secret-code-123") {
+		t.Errorf("share requests must be labelled by pattern only:\n%s", out)
+	}
+}
+
+func TestMetricsKeepsReaderFrom(t *testing.T) {
+	var w http.ResponseWriter = &countingWriter{ResponseWriter: httptest.NewRecorder()}
+	if _, ok := w.(io.ReaderFrom); !ok {
+		t.Fatal("countingWriter must implement io.ReaderFrom so sendfile still works")
+	}
+}
