@@ -5,6 +5,7 @@ A private, self-hosted file CDN for `cdn.axiosiiitl.dev`, in one Go binary with 
 - **Private by default.** Browsing, uploading, deleting and fetching all need your username and password.
 - **Every file has a share link**, including every file inside a `.zip`: `https://cdn.axiosiiitl.dev/share/k3X9fQ2mZp7Lw0aB`. Anyone with the link can stream or download that one file with no login. The code is an HMAC of the path, so it is stable and reveals nothing about the path.
 - **Videos inside zips stream** with seeking (HTTP Range), in the browser, VLC or a TV app.
+- **Text files, pastebin style.** **New text file** in any folder opens an editor, and every text file has an **Edit** link. Its share link stays the same after each save and always shows the latest text. If the file changed somewhere else since you opened it, saving asks before overwriting.
 - **Fetch** (`/fetch`): paste Google Drive, Dropbox or direct links and pick a folder; files download onto the server and show their share link when done.
 - **Browser-playable videos** (a checkbox on `/fetch`, needs `ffmpeg`): after a download, videos whose audio browsers can't play (E-AC-3, AC-3, DTS, TrueHD…) or that are in MKV/AVI are fixed by copying the video stream as-is, converting only the audio to stereo AAC, and writing MP4. Inside a zip, only those videos change and the zip keeps its path; other entries are copied byte for byte.
 
@@ -15,6 +16,7 @@ Browser ──HTTPS──> nginx :443 ──> private-cdn 127.0.0.1:8090 ──>
 | Path | Login | What it is |
 | --- | --- | --- |
 | `/files/…` | yes | Browse folders and zips, upload, new folder, delete, **Copy link** |
+| `/new?dir=…`, `/edit/…` | yes | Create or edit a text file (up to 1 MB) |
 | `/fetch` | yes | Paste-a-link downloader |
 | `/share/<code>` | **no** | The shared file, streamed |
 | `/login`, `/logout` | – | Session (30 days, HttpOnly cookie) |
