@@ -38,6 +38,9 @@ input[type=text],input[type=password],textarea{width:100%;background:var(--card)
 form.inline{display:inline}
 label.check{display:block;margin-top:10px;font-size:14px}
 label.check input{margin-right:6px;vertical-align:-1px}
+textarea.code{display:block;min-height:62vh;resize:vertical;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:4}
+.share{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.share input{flex:1;min-width:200px;color:var(--mute)}
 </style></head><body><main>{{end}}
 
 {{define "foot"}}</main>
@@ -45,7 +48,7 @@ label.check input{margin-right:6px;vertical-align:-1px}
 async function post(url, body){
   const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(j.error||r.statusText);
+  if(!r.ok) throw Object.assign(new Error(j.error||r.statusText),{status:r.status});
   return j;
 }
 document.addEventListener('click', async e=>{
@@ -83,6 +86,7 @@ document.addEventListener('click', async e=>{
   <label><button type="button" onclick="document.getElementById('up').click()">Upload</button></label>
   <input id="up" type="file" multiple hidden>
   <button type="button" id="mk">New folder</button>
+  <button type="button" onclick="location.href='/new?dir='+encodeURIComponent(REL)">New text file</button>
   <a href="/fetch?folder={{.Rel}}">Fetch links into this folder</a>
   <span id="upmsg" class="muted"></span>
 </div>
@@ -94,7 +98,7 @@ document.addEventListener('click', async e=>{
 <tr>
   <td>{{if .IsDir}}<a class="dir" href="{{.Href}}">{{.Name}}/</a>{{else if .IsZip}}<a class="dir" href="{{.Href}}/">{{.Name}}</a><span class="tag">zip</span>{{else}}<a href="{{.Href}}">{{.Name}}</a>{{end}}</td>
   <td class="sz">{{if not .IsDir}}{{size .Size}}{{end}}</td>
-  <td class="act">{{if not .IsDir}}<a class="dl" href="{{.Href}}?download=1" download>Download</a>{{end}}
+  <td class="act">{{if .Edit}}<a class="dl" href="{{.Edit}}">Edit</a>{{end}}{{if not .IsDir}}<a class="dl" href="{{.Href}}?download=1" download>Download</a>{{end}}
     {{if .Share}}<button data-copy="{{.Share}}">Copy link</button>{{end}}
     {{if .Deletable}}<button class="del" data-del="{{.Name}}" title="Delete">✕</button>{{end}}</td>
 </tr>
@@ -173,5 +177,70 @@ const cv = document.getElementById('convert');
 try{ cv.checked = localStorage.getItem('convert')==='1'; }catch{}
 cv.onchange = ()=>{ try{ localStorage.setItem('convert', cv.checked?'1':'0'); }catch{} };
 load(); setInterval(load, 1500);
+</script>
+{{template "foot"}}{{end}}
+
+{{define "edit"}}{{template "head" (or .Name "New text file")}}
+<header>
+  <div class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}} / {{end}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{end}} / {{if .New}}new text file{{else}}{{.Name}}{{end}}</div>
+  {{template "topnav"}}
+</header>
+<div class="card">
+  {{if .New}}
+  <input id="name" type="text" maxlength="255" placeholder="File name (optional; .txt is added if it has no extension)" style="margin-bottom:10px">
+  {{else}}
+  <div class="share">
+    <input type="text" readonly value="{{.Share}}" aria-label="Share link" onfocus="this.select()">
+    <button data-copy="{{.Share}}">Copy link</button>
+    <a href="{{.Raw}}">Raw</a>
+    <a href="{{.Raw}}?download=1" download>Download</a>
+  </div>
+  {{end}}
+  <textarea id="text" class="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Text"{{if .New}} autofocus placeholder="Paste or type text here"{{end}}>
+{{.Text}}</textarea>
+  <div class="tools" style="margin:10px 0 0">
+    <button class="primary" id="save">{{if .New}}Create{{else}}Save{{end}}</button>
+    <label class="check" style="margin:0"><input type="checkbox" id="wrap">Wrap lines</label>
+    <span id="msg" class="muted">{{if not .New}}Anyone with the link sees the latest saved text.{{end}}</span>
+  </div>
+</div>
+<script>
+const NEW = {{if .New}}true{{else}}false{{end}}, DIR = {{.Dir}}, PATH = {{.Path}};
+let version = {{.Version}};
+const ta = document.getElementById('text'), msg = document.getElementById('msg'), saveBtn = document.getElementById('save');
+let saved = ta.value, busy = false;
+const dirty = ()=> ta.value !== saved;
+const say = (t, cls)=>{ msg.textContent = t; msg.className = cls||'muted'; };
+ta.addEventListener('input', ()=>{ if(!NEW) say(dirty() ? 'Unsaved changes' : 'Saved'); });
+window.addEventListener('beforeunload', e=>{ if(dirty()) e.preventDefault(); });
+async function save(){
+  if(busy) return;
+  busy = true; saveBtn.disabled = true; say('Saving…');
+  const text = ta.value;
+  try{
+    if(NEW){
+      const r = await post('/api/text/create',{Dir:DIR,Name:document.getElementById('name').value,Text:text});
+      saved = text; location.replace(r.edit); return;
+    }
+    let r;
+    try{ r = await post('/api/text/save',{Path:PATH,Text:text,Version:version}); }
+    catch(err){
+      if(err.status !== 409 || !confirm('This file was changed somewhere else after you opened it. Overwrite it with your version?')) throw err;
+      r = await post('/api/text/save',{Path:PATH,Text:text,Force:true});
+    }
+    version = r.version; saved = text;
+    say(dirty() ? 'Unsaved changes' : 'Saved', dirty() ? 'muted' : 'ok');
+  }catch(err){ say(err.message, 'err'); }
+  finally{ busy = false; saveBtn.disabled = false; }
+}
+saveBtn.onclick = save;
+document.addEventListener('keydown', e=>{
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); save(); }
+});
+const wrap = document.getElementById('wrap');
+const setWrap = on=>{ ta.setAttribute('wrap', on ? 'soft' : 'off'); };
+try{ wrap.checked = localStorage.getItem('wrap')!=='0'; }catch{ wrap.checked = true; }
+setWrap(wrap.checked);
+wrap.onchange = ()=>{ setWrap(wrap.checked); try{ localStorage.setItem('wrap', wrap.checked?'1':'0'); }catch{} };
 </script>
 {{template "foot"}}{{end}}

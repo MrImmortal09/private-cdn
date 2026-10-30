@@ -194,6 +194,7 @@ type entry struct {
 	IsZip     bool
 	Size      int64
 	Share     string
+	Edit      string
 	Deletable bool
 }
 
@@ -435,19 +436,13 @@ func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		}
 		e.IsZip = isZip(e.Name) && !t.inZip
 		e.Share = s.shares.url(s.cfg.PublicURL, child)
-	}
-
-	type crumb struct{ Name, Href string }
-	crumbs := []crumb{{"files", "/files/"}}
-	acc := ""
-	if rel != "" {
-		for _, p := range strings.Split(rel, "/") {
-			acc += p + "/"
-			crumbs = append(crumbs, crumb{p, "/files/" + escapePath(strings.TrimSuffix(acc, "/")) + "/"})
+		if t.isDir && isText(e.Name) && e.Size <= maxTextSize {
+			e.Edit = "/edit/" + escapePath(child)
 		}
 	}
+
 	s.render(w, "browse", map[string]any{
-		"Rel": rel, "Crumbs": crumbs, "Entries": entries, "Writable": t.isDir,
+		"Rel": rel, "Crumbs": crumbsFor(rel), "Entries": entries, "Writable": t.isDir,
 	})
 }
 

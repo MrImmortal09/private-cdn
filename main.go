@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,7 @@ type server struct {
 	fetcher    *fetcher
 	limiter    *loginLimiter
 	tmpl       *template.Template
+	textMu     sync.Mutex // serializes text saves, so a version check can't race a write
 }
 
 func env(key, def string) string {
@@ -146,6 +148,10 @@ func (s *server) routes() http.Handler {
 	mux.Handle("POST /api/upload", s.auth(http.HandlerFunc(s.handleUpload)))
 	mux.Handle("POST /api/mkdir", s.auth(http.HandlerFunc(s.handleMkdir)))
 	mux.Handle("POST /api/delete", s.auth(http.HandlerFunc(s.handleDelete)))
+	mux.Handle("GET /new", s.auth(http.HandlerFunc(s.handleNewText)))
+	mux.Handle("GET /edit/{path...}", s.auth(http.HandlerFunc(s.handleEditText)))
+	mux.Handle("POST /api/text/create", s.auth(http.HandlerFunc(s.handleCreateText)))
+	mux.Handle("POST /api/text/save", s.auth(http.HandlerFunc(s.handleSaveText)))
 	mux.Handle("GET /fetch", s.auth(http.HandlerFunc(s.handleFetchPage)))
 	mux.Handle("GET /fetch/api/jobs", s.auth(http.HandlerFunc(s.handleFetchJobs)))
 	mux.Handle("POST /fetch/api/jobs", s.auth(http.HandlerFunc(s.handleFetchAdd)))
